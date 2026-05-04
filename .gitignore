@@ -1,3 +1,23 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Python caches and tooling
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Debian package build artifacts
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*/
+!debian/source/
+
+# Built package files (in parent dir when using dpkg-buildpackage)
+../*.deb
+../*.build
+../*.buildinfo
+../*.changes
