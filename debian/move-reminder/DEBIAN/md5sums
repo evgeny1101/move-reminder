@@ -1,0 +1,5 @@
+41ab9e963c1bde34e42e5daae7761c5b  opt/move-reminder/timer_tray.py
+383920a86ef55496b6e608277869db25  usr/bin/move-reminder-launcher
+3d5adc092593c955d26fa76264d21464  usr/share/applications/move-reminder.desktop
+b8cb7e6e009aeda306f41b1bf8035314  usr/share/doc/move-reminder/changelog.Debian.gz
+9d6b68e7bec88fcc34bfdad1f45eeb4c  usr/share/doc/move-reminder/copyright

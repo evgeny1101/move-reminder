@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Move Reminder
+Comment=Tray timer with movement reminder
+Exec=/bin/bash -lc '/home/voi/Documents/projects/opencode/move/run.sh'
+Icon=appointment-soon
+Terminal=false
+Categories=Utility;
+StartupNotify=false
