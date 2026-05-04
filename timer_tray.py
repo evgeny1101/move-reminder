@@ -18,7 +18,7 @@ def _load_indicator_class():
         from gi.repository import AyatanaAppIndicator3 as AppIndicator3  # type: ignore
 
         return AppIndicator3
-    except ValueError:
+    except (ValueError, ImportError):
         gi.require_version("AppIndicator3", "0.1")
         from gi.repository import AppIndicator3  # type: ignore
 

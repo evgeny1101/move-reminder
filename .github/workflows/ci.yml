@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install desktop validator
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+
+      - name: Validate shell scripts
+        run: |
+          bash -n run.sh
+          bash -n setup_dev.sh
+          bash -n debian/move-reminder-launcher
+
+      - name: Validate desktop entries
+        run: |
+          desktop-file-validate move-reminder.desktop
+          desktop-file-validate debian/move-reminder.desktop
+
+      - name: Validate Python syntax
+        run: python -m py_compile timer_tray.py
