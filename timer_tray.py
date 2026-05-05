@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import atexit
+import fcntl
 import os
 import signal
 import subprocess
@@ -33,6 +35,7 @@ class MoveReminderApp:
     APP_NAME = "Move Reminder"
 
     def __init__(self) -> None:
+        self._single_instance_lock = self._acquire_single_instance_lock()
         Notify.init(self.APP_ID)
 
         self.indicator = AppIndicator3.Indicator.new(
@@ -44,11 +47,26 @@ class MoveReminderApp:
 
         self.timer_seconds_left = 0
         self.timer_source_id: Optional[int] = None
+        self.selected_minutes = 45
 
         self.menu = Gtk.Menu()
         self.indicator.set_menu(self.menu)
         self._build_menu()
         self._refresh_view()
+
+    def _acquire_single_instance_lock(self):
+        lock_path = "/tmp/move-reminder.lock"
+        lock_file = open(lock_path, "w", encoding="utf-8")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_file.close()
+            raise SystemExit(0)
+
+        lock_file.write(f"{os.getpid()}\n")
+        lock_file.flush()
+        atexit.register(lock_file.close)
+        return lock_file
 
     def _build_menu(self) -> None:
         self.status_item = Gtk.MenuItem(label="Осталось: --:--")
@@ -57,22 +75,9 @@ class MoveReminderApp:
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
-        minutes_row = Gtk.MenuItem()
-        minutes_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        minutes_box.set_border_width(6)
-
-        minutes_label = Gtk.Label(label="Минуты:")
-        minutes_label.set_xalign(0.0)
-
-        self.minutes_spin = Gtk.SpinButton.new_with_range(1, 600, 1)
-        self.minutes_spin.set_value(45)
-        self.minutes_spin.set_numeric(True)
-
-        minutes_box.pack_start(minutes_label, True, True, 0)
-        minutes_box.pack_end(self.minutes_spin, False, False, 0)
-        minutes_row.add(minutes_box)
-        minutes_row.set_sensitive(False)
-        self.menu.append(minutes_row)
+        self.minutes_item = Gtk.MenuItem(label=f"Минуты: {self.selected_minutes}")
+        self.minutes_item.connect("activate", self._on_edit_minutes_clicked)
+        self.menu.append(self.minutes_item)
 
         self.start_item = Gtk.MenuItem(label="Старт")
         self.start_item.connect("activate", self._on_start_clicked)
@@ -102,15 +107,45 @@ class MoveReminderApp:
         self.menu.show_all()
 
     def _on_start_clicked(self, _widget: Gtk.Widget) -> None:
-        minutes = int(self.minutes_spin.get_value())
-        self.start_timer(minutes)
+        self.start_timer(self.selected_minutes)
 
     def _on_stop_clicked(self, _widget: Gtk.Widget) -> None:
         self.stop_timer()
 
     def _on_preset_clicked(self, _widget: Gtk.Widget, minutes: int) -> None:
-        self.minutes_spin.set_value(minutes)
+        self.selected_minutes = minutes
+        self._refresh_minutes_label()
         self.start_timer(minutes)
+
+    def _on_edit_minutes_clicked(self, _widget: Gtk.Widget) -> None:
+        dialog = Gtk.Dialog(
+            title="Изменить минуты",
+            modal=True,
+        )
+        dialog.add_button("Отмена", Gtk.ResponseType.CANCEL)
+        dialog.add_button("OK", Gtk.ResponseType.OK)
+
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        content.set_border_width(10)
+
+        label = Gtk.Label(label="Минуты:")
+        label.set_xalign(0.0)
+        spin = Gtk.SpinButton.new_with_range(1, 600, 1)
+        spin.set_numeric(True)
+        spin.set_value(self.selected_minutes)
+
+        content.pack_start(label, False, False, 0)
+        content.pack_start(spin, False, False, 0)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            self.selected_minutes = int(spin.get_value())
+            self._refresh_minutes_label()
+
+        dialog.destroy()
 
     def _on_quit(self, _widget: Gtk.Widget) -> None:
         self.stop_timer()
@@ -158,6 +193,9 @@ class MoveReminderApp:
             self.start_item.set_sensitive(True)
             self.stop_item.set_sensitive(False)
             self.indicator.set_icon_full("appointment-soon", "timer idle")
+
+    def _refresh_minutes_label(self) -> None:
+        self.minutes_item.set_label(f"Минуты: {self.selected_minutes}")
 
     def _notify_done(self) -> None:
         notification = Notify.Notification.new(
