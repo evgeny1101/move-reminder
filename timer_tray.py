@@ -2,8 +2,10 @@
 import atexit
 import fcntl
 import os
+import pathlib
 import signal
 import subprocess
+import sys
 from typing import Optional
 
 import gi
@@ -55,8 +57,22 @@ class MoveReminderApp:
         self._refresh_view()
 
     def _acquire_single_instance_lock(self):
-        lock_path = "/tmp/move-reminder.lock"
-        lock_file = open(lock_path, "w", encoding="utf-8")
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime_dir:
+            lock_dir = pathlib.Path(runtime_dir)
+        else:
+            lock_dir = pathlib.Path.home() / ".cache" / "move-reminder"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+
+        lock_path = lock_dir / "move-reminder.lock"
+        open_flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_CLOEXEC"):
+            open_flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            open_flags |= os.O_NOFOLLOW
+
+        lock_fd = os.open(str(lock_path), open_flags, 0o600)
+        lock_file = os.fdopen(lock_fd, "w", encoding="utf-8")
         try:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -204,7 +220,10 @@ class MoveReminderApp:
             "dialog-information",
         )
         notification.set_urgency(Notify.Urgency.NORMAL)
-        notification.show()
+        try:
+            notification.show()
+        except Exception as exc:
+            print(f"move-reminder: failed to show notification: {exc}", file=sys.stderr)
 
     def _play_sound(self) -> None:
         commands = [
@@ -220,11 +239,23 @@ class MoveReminderApp:
         ]
         for command in commands:
             try:
-                subprocess.Popen(
+                process = subprocess.Popen(
                     command,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
+                try:
+                    return_code = process.wait(timeout=0.25)
+                    if return_code == 0:
+                        return
+                except subprocess.TimeoutExpired:
+                    return
+                except Exception:
+                    continue
+
+                if return_code != 0:
+                    continue
+
                 return
             except FileNotFoundError:
                 continue
