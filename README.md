@@ -5,6 +5,8 @@
 - позволяет выбрать минуты и запустить одноразовый таймер;
 - по завершении отправляет системное уведомление и проигрывает звук.
 
+Проект ведется с использованием OpenCode.
+
 ## Требования
 
 - Ubuntu 24.04 (GNOME)
@@ -28,6 +30,26 @@ chmod +x setup_dev.sh run.sh
 
 ```bash
 ./run.sh
+```
+
+## Проверка изменений
+
+Быстрые проверки перед коммитом:
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/pytest -q
+.venv/bin/python -m py_compile timer_tray.py
+```
+
+Проверки скриптов и desktop-файлов (как в CI):
+
+```bash
+bash -n run.sh
+bash -n setup_dev.sh
+bash -n debian/move-reminder-launcher
+desktop-file-validate move-reminder.desktop
+desktop-file-validate debian/move-reminder.desktop
 ```
 
 ## 3) Необязательное добавление ярлыка

@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python tooling
+        run: python -m pip install ruff pytest
+
       - name: Install desktop validator
         run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
 
@@ -35,3 +38,9 @@ jobs:
 
       - name: Validate Python syntax
         run: python -m py_compile timer_tray.py
+
+      - name: Run Ruff
+        run: ruff check .
+
+      - name: Run pytest
+        run: pytest -q
