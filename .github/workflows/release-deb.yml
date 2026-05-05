@@ -1,0 +1,49 @@
+name: Release Debian Package
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release-deb:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Debian build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential debhelper dh-python dpkg-dev
+
+      - name: Validate tag and Debian version alignment
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          DEB_VERSION="$(dpkg-parsechangelog -S Version)"
+          if [ "${DEB_VERSION}" != "${TAG_VERSION}-1" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match debian/changelog version ${DEB_VERSION}."
+            echo "Expected debian/changelog version: ${TAG_VERSION}-1"
+            exit 1
+          fi
+
+      - name: Build .deb package
+        run: |
+          chmod +x debian/rules debian/move-reminder-launcher
+          dpkg-buildpackage -us -uc -b
+
+      - name: Collect build artifacts
+        run: |
+          mkdir -p dist
+          cp ../*.deb dist/
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          generate_release_notes: true

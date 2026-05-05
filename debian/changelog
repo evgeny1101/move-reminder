@@ -1,3 +1,9 @@
+move-reminder (1.0.0-1) unstable; urgency=medium
+
+  * First stable release.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Tue, 05 May 2026 12:00:00 +0000
+
 move-reminder (0.1.0-1) unstable; urgency=medium
 
   * Initial package release.
