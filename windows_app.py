@@ -1,7 +1,6 @@
 import atexit
 import os
 import pathlib
-import subprocess
 import sys
 import threading
 import time
@@ -22,6 +21,7 @@ class MoveReminderWindowsApp:
     def __init__(self) -> None:
         self._single_instance_lock = self._acquire_single_instance_lock()
         self._state_lock = threading.Lock()
+        self._dialog_lock = threading.Lock()
         self.timer_seconds_left = 0
         self.selected_minutes = 45
         self._timer_thread: Optional[threading.Thread] = None
@@ -126,48 +126,44 @@ class MoveReminderWindowsApp:
         self._safe_update_menu()
 
     def _ask_minutes_with_tk_dialog(self, initial_minutes: int) -> Optional[int]:
-        script = (
-            "import sys\n"
-            "import tkinter as tk\n"
-            "from tkinter import simpledialog\n"
-            "root = tk.Tk()\n"
-            "root.withdraw()\n"
-            "value = simpledialog.askinteger(\n"
-            "    'Изменить минуты',\n"
-            "    'Минуты:',\n"
-            "    initialvalue=int(sys.argv[1]),\n"
-            "    minvalue=1,\n"
-            "    maxvalue=600,\n"
-            ")\n"
-            "root.destroy()\n"
-            "if value is not None:\n"
-            "    print(value)\n"
-        )
+        if not self._dialog_lock.acquire(blocking=False):
+            return None
+
+        root = None
         try:
-            result = subprocess.run(
-                [sys.executable, "-c", script, str(initial_minutes)],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=90,
+            try:
+                import tkinter as tk
+                from tkinter import simpledialog
+            except ImportError:
+                print(
+                    "move-reminder: tkinter is not available, cannot open minutes dialog",
+                    file=sys.stderr,
+                )
+                return None
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            value = simpledialog.askinteger(
+                "Изменить минуты",
+                "Минуты:",
+                parent=root,
+                initialvalue=initial_minutes,
+                minvalue=1,
+                maxvalue=600,
             )
         except Exception as exc:
             print(f"move-reminder: failed to open minutes dialog: {exc}", file=sys.stderr)
             return None
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+            self._dialog_lock.release()
 
-        if result.returncode != 0:
-            error = result.stderr.strip() or f"exit code {result.returncode}"
-            print(f"move-reminder: minutes dialog failed: {error}", file=sys.stderr)
-            return None
-
-        output = result.stdout.strip()
-        if not output:
-            return None
-
-        try:
-            value = int(output)
-        except ValueError:
-            print("move-reminder: invalid minutes dialog output", file=sys.stderr)
+        if value is None:
             return None
 
         return max(1, min(value, 600))
