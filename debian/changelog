@@ -1,3 +1,12 @@
+move-reminder (1.1.0-1) unstable; urgency=medium
+
+  * Release 1.1.0.
+  * Add Windows tray backend and notifications.
+  * Add Windows packaging pipeline (PyInstaller + Inno Setup).
+  * Refresh README for cross-platform usage and build flows.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Wed, 13 May 2026 10:00:00 +0000
+
 move-reminder (1.0.0-1) unstable; urgency=medium
 
   * First stable release.

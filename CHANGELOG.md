@@ -4,6 +4,20 @@
 
 Формат основан на Keep a Changelog, проект следует Semantic Versioning.
 
+## [1.1.0] - 2026-05-13
+
+### Добавлено
+
+- Поддержка Windows 10/11: отдельный tray-backend на `pystray` с уведомлениями и звуком.
+- Сборка Windows portable-бинарника (`move-reminder-portable.exe`) через PyInstaller.
+- Сборка Windows установщика (`move-reminder-setup.exe`) через Inno Setup.
+- Автоматический GitHub Actions релиз Windows-артефактов по тегам `v*`.
+
+### Изменено
+
+- README обновлен под кроссплатформенный сценарий (Linux + Windows).
+- Улучшена стабильность Windows-пайплайна: проверка артефакта перед упаковкой, фикс путей Inno Setup, отключен UPX.
+
 ## [1.0.0] - 2026-05-05
 
 ### Добавлено
