@@ -1,21 +1,25 @@
-# Move Reminder (таймер в трее для Ubuntu GNOME)
+# Move Reminder (кроссплатформенный таймер в трее)
 
-Таймер в трее для Ubuntu 24.04 GNOME:
+Move Reminder - таймер в системном трее для Linux (Ubuntu GNOME) и Windows 10/11:
 - запускается из значка в трее;
 - позволяет выбрать минуты и запустить одноразовый таймер;
-- по завершении отправляет системное уведомление и проигрывает звук.
+- по завершении отправляет системное уведомление и проигрывает звук;
+- работает в режиме одного экземпляра.
 
 Проект ведется с использованием OpenCode.
 
 ## Требования
 
-- Ubuntu 24.04 (GNOME)
+### Linux (Ubuntu 24.04 GNOME)
+
 - Python 3
 - Пакеты: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-notify-0.7`, `gir1.2-ayatanaappindicator3-0.1`
 
-Для Windows 10/11 (экспериментально):
+### Windows 10/11
+
 - Python 3
-- Python-пакеты: `pystray`, `pillow`, `win10toast`
+- Python-пакеты для запуска: `pystray`, `pillow`, `win10toast`
+- Для сборки дистрибутива: зависимости из `requirements-windows.txt` и Inno Setup 6 (`ISCC.exe`)
 
 ## 1) Настройка окружения для разработки (с venv)
 
@@ -41,6 +45,28 @@ chmod +x setup_dev.sh run.sh
 ```bash
 python timer_tray.py
 ```
+
+## Windows: сборка дистрибутива
+
+Сборка portable `.exe` на Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
+```
+
+Результат: `dist/move-reminder-portable.exe`
+
+Сборка установщика `.exe` на Windows (после portable):
+
+```powershell
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=1.0.0" ".\packaging\windows\move-reminder.iss"
+```
+
+Результат: `dist/move-reminder-setup.exe`
+
+Для релиза рекомендуется передавать версию из тега `vX.Y.Z` как `X.Y.Z` в параметр `MyAppVersion`.
+
+В GitHub Actions Windows-артефакты (`portable.exe` и `setup.exe`) публикуются автоматически при push тега `v*`.
 
 ## Проверка изменений
 
@@ -134,7 +160,8 @@ sudo apt purge move-reminder
 ## Ограничения
 
 - Linux-режим рассчитан на Ubuntu GNOME и системный tray/AppIndicator.
-- Windows-режим использует `pystray` и может отличаться по отображению в зависимости от shell/настроек уведомлений.
+- Windows-режим использует `pystray` и может отличаться по отображению в зависимости от shell и настроек уведомлений.
+- Неподписанные Windows-бинарники могут показывать предупреждение SmartScreen.
 - Таймер одноразовый, без истории и автоповтора.
 
 ## Лицензия
