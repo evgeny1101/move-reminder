@@ -13,6 +13,10 @@
 - Python 3
 - Пакеты: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-notify-0.7`, `gir1.2-ayatanaappindicator3-0.1`
 
+Для Windows 10/11 (экспериментально):
+- Python 3
+- Python-пакеты: `pystray`, `pillow`, `win10toast`
+
 ## 1) Настройка окружения для разработки (с venv)
 
 ```bash
@@ -30,6 +34,12 @@ chmod +x setup_dev.sh run.sh
 
 ```bash
 ./run.sh
+```
+
+На Windows:
+
+```bash
+python timer_tray.py
 ```
 
 ## Проверка изменений
@@ -123,7 +133,8 @@ sudo apt purge move-reminder
 
 ## Ограничения
 
-- Приложение рассчитано на Linux (Ubuntu GNOME) и системный tray/AppIndicator.
+- Linux-режим рассчитан на Ubuntu GNOME и системный tray/AppIndicator.
+- Windows-режим использует `pystray` и может отличаться по отображению в зависимости от shell/настроек уведомлений.
 - Таймер одноразовый, без истории и автоповтора.
 
 ## Лицензия

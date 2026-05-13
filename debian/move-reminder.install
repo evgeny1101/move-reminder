@@ -1,3 +1,4 @@
 timer_tray.py opt/move-reminder/
+linux_app.py opt/move-reminder/
 debian/move-reminder-launcher usr/bin/
 debian/move-reminder.desktop usr/share/applications/

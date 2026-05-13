@@ -35,7 +35,7 @@ def _install_gi_stubs() -> None:
 
 
 _install_gi_stubs()
-timer_tray = importlib.import_module("timer_tray")
+timer_tray = importlib.import_module("linux_app")
 
 
 class _MenuItem:
