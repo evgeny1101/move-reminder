@@ -4,6 +4,12 @@
 
 Формат основан на Keep a Changelog, проект следует Semantic Versioning.
 
+## [1.1.1] - 2026-05-13
+
+### Исправлено
+
+- Исправлена сборка Windows portable-бинарника в GitHub Actions: путь к `timer_tray.py` в PyInstaller spec теперь корректно резолвится из корня репозитория.
+
 ## [1.1.0] - 2026-05-13
 
 ### Добавлено

@@ -1,11 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 block_cipher = None
+project_root = Path.cwd()
 
 
 a = Analysis(
-    ['timer_tray.py'],
-    pathex=[],
+    [str(project_root / 'timer_tray.py')],
+    pathex=[str(project_root)],
     binaries=[],
     datas=[],
     hiddenimports=[

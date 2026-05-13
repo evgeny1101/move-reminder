@@ -1,3 +1,10 @@
+move-reminder (1.1.1-1) unstable; urgency=medium
+
+  * Release 1.1.1.
+  * Fix Windows CI build by resolving PyInstaller entry script from repository root.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Wed, 13 May 2026 13:20:00 +0000
+
 move-reminder (1.1.0-1) unstable; urgency=medium
 
   * Release 1.1.0.
