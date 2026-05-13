@@ -1,3 +1,11 @@
+move-reminder (1.1.2-1) unstable; urgency=medium
+
+  * Release 1.1.2.
+  * Fix Windows installer artifact publishing path in release workflow.
+  * Add explicit check for dist/move-reminder-setup.exe before upload.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Wed, 13 May 2026 13:35:00 +0000
+
 move-reminder (1.1.1-1) unstable; urgency=medium
 
   * Release 1.1.1.

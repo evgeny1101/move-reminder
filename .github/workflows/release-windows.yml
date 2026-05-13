@@ -49,6 +49,13 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" "packaging/windows/move-reminder.iss"
 
+      - name: Verify installer executable exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/move-reminder-setup.exe")) {
+            throw "Installer executable not found at dist/move-reminder-setup.exe"
+          }
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
