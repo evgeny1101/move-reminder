@@ -1,8 +1,8 @@
+import builtins
 import importlib
 import sys
 import threading
 import types
-import builtins
 
 import pytest
 
@@ -58,7 +58,8 @@ def _install_tk_stubs(value=None, raise_on_ask=False):
         def destroy(self):
             calls["destroyed"] = True
 
-    tk_module = types.SimpleNamespace(Tk=lambda: _Root())
+    tk_module = types.ModuleType("tkinter")
+    tk_module.Tk = lambda: _Root()
 
     def _askinteger(*_args, **_kwargs):
         ask_calls.append(_kwargs)
@@ -66,7 +67,9 @@ def _install_tk_stubs(value=None, raise_on_ask=False):
             raise RuntimeError("dialog fail")
         return value
 
-    simpledialog_module = types.SimpleNamespace(askinteger=_askinteger)
+    simpledialog_module = types.ModuleType("tkinter.simpledialog")
+    simpledialog_module.askinteger = _askinteger
+    tk_module.simpledialog = simpledialog_module
 
     sys.modules["tkinter"] = tk_module
     sys.modules["tkinter.simpledialog"] = simpledialog_module
