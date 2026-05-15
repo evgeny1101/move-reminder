@@ -44,7 +44,14 @@ def _install_windows_stubs() -> None:
 
 
 def _install_tk_stubs(value=None, raise_on_ask=False):
-    calls = {"destroyed": False, "withdrawn": False, "topmost": False}
+    calls = {
+        "destroyed": False,
+        "withdrawn": False,
+        "topmost": False,
+        "lifted": False,
+        "focused": False,
+        "updated": False,
+    }
     ask_calls = []
 
     class _Root:
@@ -57,6 +64,15 @@ def _install_tk_stubs(value=None, raise_on_ask=False):
 
         def destroy(self):
             calls["destroyed"] = True
+
+        def lift(self):
+            calls["lifted"] = True
+
+        def focus_force(self):
+            calls["focused"] = True
+
+        def update(self):
+            calls["updated"] = True
 
     tk_module = types.ModuleType("tkinter")
     tk_module.Tk = lambda: _Root()
@@ -127,6 +143,9 @@ def test_tk_dialog_returns_value_and_closes_root():
     assert ask_calls[0]["parent"] is not None
     assert calls["withdrawn"] is True
     assert calls["topmost"] is True
+    assert calls["lifted"] is True
+    assert calls["focused"] is True
+    assert calls["updated"] is True
     assert calls["destroyed"] is True
 
 

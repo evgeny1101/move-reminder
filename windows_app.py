@@ -144,6 +144,9 @@ class MoveReminderWindowsApp:
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
+            root.lift()
+            root.focus_force()
+            root.update()
             value = simpledialog.askinteger(
                 "Изменить минуты",
                 "Минуты:",
