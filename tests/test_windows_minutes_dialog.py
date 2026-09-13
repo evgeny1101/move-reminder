@@ -43,53 +43,129 @@ def _install_windows_stubs() -> None:
     sys.modules["PIL.ImageDraw"] = draw_module
 
 
-def _install_tk_stubs(value=None, raise_on_ask=False):
-    calls = {
-        "destroyed": False,
-        "withdrawn": False,
-        "topmost": False,
-        "lifted": False,
-        "focused": False,
-        "updated": False,
-    }
-    ask_calls = []
+def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
+    calls = {}
+    entry_ref = [None]
+    ok_command = [None]
+    cancel_command = [None]
 
     class _Root:
         def withdraw(self):
             calls["withdrawn"] = True
 
-        def attributes(self, key, enabled):
-            if key == "-topmost" and enabled is True:
-                calls["topmost"] = True
-
         def destroy(self):
-            calls["destroyed"] = True
+            calls["root_destroyed"] = True
+
+    if raise_on_root:
+        class _FailingRoot(_Root):
+            def __init__(self):
+                raise RuntimeError("tk init fail")
+
+        tk_module = types.ModuleType("tkinter")
+        tk_module.Tk = _FailingRoot
+        sys.modules["tkinter"] = tk_module
+        return calls, entry_ref
+
+    class _TopLevel:
+        def __init__(self, parent):
+            calls["top_created"] = True
+
+        def title(self, t):
+            calls["title"] = t
+
+        def resizable(self, a, b):
+            pass
+
+        def attributes(self, *args):
+            calls["topmost"] = True
+
+        def protocol(self, name, handler):
+            calls["close_handler"] = handler
+
+        def pack(self, **kwargs):
+            pass
+
+        def grab_set(self):
+            calls["grab_set"] = True
+
+        def wait_window(self, w):
+            calls["wait_window"] = True
+            if cancel and cancel_command[0] is not None:
+                cancel_command[0]()
+            elif ok_command[0] is not None:
+                ok_command[0]()
+
+        def after(self, ms, func):
+            func()
+
+        def focus_force(self):
+            calls["top_focused"] = True
 
         def lift(self):
             calls["lifted"] = True
 
-        def focus_force(self):
-            calls["focused"] = True
+        def destroy(self):
+            calls["top_destroyed"] = True
 
-        def update(self):
-            calls["updated"] = True
+    class _Frame:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def pack(self, **kwargs):
+            pass
+
+    class _Label:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def pack(self, **kwargs):
+            pass
+
+    class _Entry:
+        def __init__(self, parent, **kwargs):
+            self._value = ""
+            self._focused = False
+            entry_ref[0] = self
+
+        def insert(self, pos, text):
+            self._value = text
+
+        def get(self):
+            return entry_value
+
+        def select_range(self, start, end):
+            calls["entry_selected"] = True
+
+        def pack(self, **kwargs):
+            pass
+
+        def bind(self, sequence, func):
+            calls[f"bind_{sequence}"] = func
+
+        def focus_set(self):
+            self._focused = True
+            calls["entry_focused"] = True
+
+    class _Button:
+        def __init__(self, parent, text="", command=None, **kwargs):
+            if text == "OK":
+                ok_command[0] = command
+            elif text == "Отмена":
+                cancel_command[0] = command
+
+        def pack(self, **kwargs):
+            pass
 
     tk_module = types.ModuleType("tkinter")
-    tk_module.Tk = lambda: _Root()
-
-    def _askinteger(*_args, **_kwargs):
-        ask_calls.append(_kwargs)
-        if raise_on_ask:
-            raise RuntimeError("dialog fail")
-        return value
-
-    simpledialog_module = types.ModuleType("tkinter.simpledialog")
-    simpledialog_module.askinteger = _askinteger
-    tk_module.simpledialog = simpledialog_module
+    tk_module.Tk = _Root
+    tk_module.Toplevel = lambda parent: _TopLevel(parent)
+    tk_module.Frame = _Frame
+    tk_module.Label = _Label
+    tk_module.Entry = _Entry
+    tk_module.Button = _Button
 
     sys.modules["tkinter"] = tk_module
-    sys.modules["tkinter.simpledialog"] = simpledialog_module
-    return calls, ask_calls
+    return calls, entry_ref
 
 
 _install_windows_stubs()
@@ -132,42 +208,64 @@ def test_edit_minutes_cancel_keeps_value(monkeypatch):
 
 def test_tk_dialog_returns_value_and_closes_root():
     app = _build_app()
-    calls, ask_calls = _install_tk_stubs(value=60)
+    calls, entry_ref = _install_tk_stubs(entry_value="60")
 
     result = app._ask_minutes_with_tk_dialog(45)
 
     assert result == 60
-    assert ask_calls[0]["initialvalue"] == 45
-    assert ask_calls[0]["minvalue"] == 1
-    assert ask_calls[0]["maxvalue"] == 600
-    assert ask_calls[0]["parent"] is not None
+    assert entry_ref[0] is not None
     assert calls["withdrawn"] is True
     assert calls["topmost"] is True
     assert calls["lifted"] is True
-    assert calls["focused"] is True
-    assert calls["updated"] is True
-    assert calls["destroyed"] is True
+    assert calls["top_focused"] is True
+    assert calls["entry_focused"] is True
+    assert calls["entry_selected"] is True
+    assert calls["grab_set"] is True
+    assert calls["wait_window"] is True
+    assert calls["top_destroyed"] is True
+    assert calls["root_destroyed"] is True
+
+
+def test_tk_dialog_sets_initial_value_in_entry():
+    app = _build_app()
+    _calls, entry_ref = _install_tk_stubs(entry_value="45")
+
+    app._ask_minutes_with_tk_dialog(33)
+
+    assert entry_ref[0] is not None
+    assert entry_ref[0]._value == "33"
+
+
+def test_tk_dialog_binds_return_and_escape():
+    app = _build_app()
+    calls, _entry_ref = _install_tk_stubs()
+
+    app._ask_minutes_with_tk_dialog(45)
+
+    assert calls["bind_<Return>"] is not None
+    assert calls["bind_<Escape>"] is not None
+    assert calls["close_handler"] is not None
 
 
 def test_tk_dialog_returns_none_on_exception(capsys):
     app = _build_app()
-    calls, _ask_calls = _install_tk_stubs(raise_on_ask=True)
+    calls, _entry_ref = _install_tk_stubs(raise_on_root=True)
 
     result = app._ask_minutes_with_tk_dialog(45)
 
     assert result is None
-    assert calls["destroyed"] is True
     assert "failed to open minutes dialog" in capsys.readouterr().err
 
 
 def test_tk_dialog_cancel_returns_none():
     app = _build_app()
-    calls, _ask_calls = _install_tk_stubs()
+    calls, _entry_ref = _install_tk_stubs(cancel=True)
 
     result = app._ask_minutes_with_tk_dialog(45)
 
     assert result is None
-    assert calls["destroyed"] is True
+    assert calls["top_destroyed"] is True
+    assert calls["root_destroyed"] is True
 
 
 def test_tk_dialog_guard_prevents_concurrent_open():
@@ -183,6 +281,7 @@ def test_tk_dialog_guard_prevents_concurrent_open():
 
 def test_tk_dialog_tkinter_missing(monkeypatch, capsys):
     app = _build_app()
+    sys.modules.pop("tkinter", None)
     original_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -199,17 +298,26 @@ def test_tk_dialog_tkinter_missing(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    ("dialog_value", "expected"),
+    ("entry_value", "expected"),
     [
-        (0, 1),
-        (1000, 600),
-        (30, 30),
+        ("0", 1),
+        ("1000", 600),
+        ("30", 30),
     ],
 )
-def test_tk_dialog_clamps_input(dialog_value, expected):
+def test_tk_dialog_clamps_input(entry_value, expected):
     app = _build_app()
-    _calls, _ask_calls = _install_tk_stubs(value=dialog_value)
+    _calls, _entry_ref = _install_tk_stubs(entry_value=entry_value)
 
     result = app._ask_minutes_with_tk_dialog(45)
 
     assert result == expected
+
+
+def test_tk_dialog_non_numeric_input_returns_none():
+    app = _build_app()
+    _calls, _entry_ref = _install_tk_stubs(entry_value="abc")
+
+    result = app._ask_minutes_with_tk_dialog(45)
+
+    assert result is None

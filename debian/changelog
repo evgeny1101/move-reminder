@@ -1,3 +1,12 @@
+move-reminder (1.1.5-1) unstable; urgency=medium
+
+  * Release 1.1.5.
+  * Replace askinteger with explicit tkinter dialog so the minutes entry
+    receives focus and the current value can be edited in Windows portable.
+  * Add regression tests for focus, editing, confirm/cancel and value clamping.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Sun, 13 Sep 2026 14:20:00 +0000
+
 move-reminder (1.1.4-1) unstable; urgency=medium
 
   * Release 1.1.4.

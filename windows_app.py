@@ -133,7 +133,6 @@ class MoveReminderWindowsApp:
         try:
             try:
                 import tkinter as tk
-                from tkinter import simpledialog
             except ImportError:
                 print(
                     "move-reminder: tkinter is not available, cannot open minutes dialog",
@@ -141,20 +140,65 @@ class MoveReminderWindowsApp:
                 )
                 return None
 
+            result_value = None
             root = tk.Tk()
             root.withdraw()
-            root.attributes("-topmost", True)
-            root.lift()
-            root.focus_force()
-            root.update()
-            value = simpledialog.askinteger(
-                "Изменить минуты",
-                "Минуты:",
-                parent=root,
-                initialvalue=initial_minutes,
-                minvalue=1,
-                maxvalue=600,
+
+            top = tk.Toplevel(root)
+            top.title("Изменить минуты")
+            top.resizable(False, False)
+            top.attributes("-topmost", True)
+
+            frame = tk.Frame(top, padx=12, pady=12)
+            frame.pack(fill="both", expand=True)
+
+            label = tk.Label(frame, text="Минуты:")
+            label.pack(anchor="w")
+
+            entry = tk.Entry(frame, width=10)
+            entry.insert(0, str(initial_minutes))
+            entry.pack(fill="x", pady=(4, 8))
+
+            btn_frame = tk.Frame(frame)
+            btn_frame.pack(fill="x")
+
+            def _on_submit():
+                nonlocal result_value
+                try:
+                    val = int(entry.get().strip())
+                except (ValueError, TypeError):
+                    val = None
+                if val is not None:
+                    result_value = max(1, min(val, 600))
+                top.destroy()
+
+            def _on_cancel():
+                top.destroy()
+
+            ok_btn = tk.Button(btn_frame, text="OK", width=8, command=_on_submit)
+            ok_btn.pack(side="right", padx=(4, 0))
+
+            cancel_btn = tk.Button(btn_frame, text="Отмена", width=8, command=_on_cancel)
+            cancel_btn.pack(side="right")
+
+            entry.bind("<Return>", lambda _: _on_submit())
+            entry.bind("<Escape>", lambda _: _on_cancel())
+
+            top.protocol("WM_DELETE_WINDOW", _on_cancel)
+
+            top.after(
+                50,
+                lambda: (
+                    top.lift(),
+                    top.focus_force(),
+                    entry.focus_set(),
+                    entry.select_range(0, "end"),
+                ),
             )
+
+            top.grab_set()
+            top.wait_window(top)
+
         except Exception as exc:
             print(f"move-reminder: failed to open minutes dialog: {exc}", file=sys.stderr)
             return None
@@ -166,10 +210,7 @@ class MoveReminderWindowsApp:
                     pass
             self._dialog_lock.release()
 
-        if value is None:
-            return None
-
-        return max(1, min(value, 600))
+        return result_value
 
     def _on_quit(self, _icon=None, _item=None) -> None:
         self.stop_timer()
