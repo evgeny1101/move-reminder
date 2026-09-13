@@ -1,6 +1,7 @@
 import atexit
 import os
 import pathlib
+import queue
 import sys
 import threading
 import time
@@ -18,9 +19,8 @@ except ImportError as exc:  # pragma: no cover
 def _activate_dialog(top, entry) -> None:
     """Gives keyboard focus to the entry of a tkinter dialog.
 
-    Tkinter's focus_force does not reliably transfer keyboard focus on Windows
-    10/11 when the dialog is opened from a tray menu, so the native window is
-    additionally brought to the foreground via the Win32 API.
+    The dialog is created and shown from the persistent Tk thread event loop,
+    so plain Tk calls (lift + focus_force) are sufficient on Windows 10/11.
     """
     try:
         top.update_idletasks()
@@ -30,7 +30,6 @@ def _activate_dialog(top, entry) -> None:
         top.lift()
     except Exception:
         pass
-    _bring_to_foreground(top)
     try:
         top.focus_force()
     except Exception:
@@ -45,57 +44,9 @@ def _activate_dialog(top, entry) -> None:
         pass
 
 
-def _bring_to_foreground(top) -> None:
-    """Brings a tkinter window to the Windows foreground.
-
-    Needed because a background process cannot always take the foreground with
-    SetForegroundWindow alone; attaching to the input queue of the current
-    foreground thread makes the call succeed.
-    """
-    if not sys.platform.startswith("win"):
-        return
-    try:
-        import ctypes
-    except Exception:
-        return
-    try:
-        hwnd = int(top.winfo_id())
-    except Exception:
-        return
-    try:
-        wintypes = ctypes.wintypes
-        user32 = ctypes.windll.user32
-        user32.GetForegroundWindow.restype = wintypes.HWND
-        user32.GetCurrentThreadId.restype = wintypes.DWORD
-        user32.GetWindowThreadProcessId.argtypes = [
-            wintypes.HWND,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-        user32.AttachThreadInput.argtypes = [
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.BOOL,
-        ]
-        user32.BringWindowToTop.argtypes = [wintypes.HWND]
-        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-
-        foreground = user32.GetForegroundWindow()
-        current_thread = user32.GetCurrentThreadId()
-        foreground_thread = user32.GetWindowThreadProcessId(foreground, 0)
-        if foreground_thread != current_thread:
-            user32.AttachThreadInput(foreground_thread, current_thread, True)
-            try:
-                user32.BringWindowToTop(hwnd)
-                user32.SetForegroundWindow(hwnd)
-            finally:
-                user32.AttachThreadInput(foreground_thread, current_thread, False)
-    except Exception:
-        pass
-
-
 class MoveReminderWindowsApp:
     APP_NAME = "Move Reminder"
+    TRAY_POLL_MS = 100
 
     def __init__(self) -> None:
         self._single_instance_lock = self._acquire_single_instance_lock()
@@ -105,6 +56,10 @@ class MoveReminderWindowsApp:
         self.selected_minutes = 45
         self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._commands: "queue.Queue" = queue.Queue()
+        self._tk_root = None
+        self._tk_ready = threading.Event()
+        self._tk_thread = threading.Thread(target=self._tk_main, daemon=True)
         self._icon = pystray.Icon("move-reminder", self._create_icon(), self.APP_NAME)
         self._icon.menu = self._build_menu()
 
@@ -195,35 +150,21 @@ class MoveReminderWindowsApp:
     def _on_edit_minutes_clicked(self, _icon=None, _item=None) -> None:
         with self._state_lock:
             initial_minutes = self.selected_minutes
+        self._commands.put(("edit_minutes", initial_minutes))
 
-        value = self._ask_minutes_with_tk_dialog(initial_minutes)
-        if value is None:
+    def _open_minutes_dialog(self, initial_minutes: int) -> None:
+        if not self._dialog_lock.acquire(blocking=False):
             return
 
-        with self._state_lock:
-            self.selected_minutes = value
-        self._safe_update_menu()
-
-    def _ask_minutes_with_tk_dialog(self, initial_minutes: int) -> Optional[int]:
-        if not self._dialog_lock.acquire(blocking=False):
-            return None
-
-        root = None
+        handed_off = False
+        top = None
         try:
-            try:
-                import tkinter as tk
-            except ImportError:
-                print(
-                    "move-reminder: tkinter is not available, cannot open minutes dialog",
-                    file=sys.stderr,
-                )
-                return None
+            if self._tk_root is None:
+                return
 
-            result_value = None
-            root = tk.Tk()
-            root.withdraw()
+            import tkinter as tk
 
-            top = tk.Toplevel(root)
+            top = tk.Toplevel(self._tk_root)
             top.title("Изменить минуты")
             top.resizable(False, False)
             top.attributes("-topmost", True)
@@ -241,18 +182,26 @@ class MoveReminderWindowsApp:
             btn_frame = tk.Frame(frame)
             btn_frame.pack(fill="x")
 
+            def _finish(value: Optional[int]) -> None:
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
+                if value is not None:
+                    with self._state_lock:
+                        self.selected_minutes = value
+                    self._safe_update_menu()
+                self._dialog_lock.release()
+
             def _on_submit():
-                nonlocal result_value
                 try:
                     val = int(entry.get().strip())
                 except (ValueError, TypeError):
                     val = None
-                if val is not None:
-                    result_value = max(1, min(val, 600))
-                top.destroy()
+                _finish(max(1, min(val, 600)) if val is not None else None)
 
             def _on_cancel():
-                top.destroy()
+                _finish(None)
 
             ok_btn = tk.Button(btn_frame, text="OK", width=8, command=_on_submit)
             ok_btn.pack(side="right", padx=(4, 0))
@@ -262,27 +211,71 @@ class MoveReminderWindowsApp:
 
             entry.bind("<Return>", lambda _: _on_submit())
             entry.bind("<Escape>", lambda _: _on_cancel())
-
             top.protocol("WM_DELETE_WINDOW", _on_cancel)
 
             _activate_dialog(top, entry)
             top.after(50, lambda: _activate_dialog(top, entry))
-
             top.grab_set()
-            top.wait_window(top)
-
+            handed_off = True
         except Exception as exc:
             print(f"move-reminder: failed to open minutes dialog: {exc}", file=sys.stderr)
-            return None
         finally:
-            if root is not None:
-                try:
-                    root.destroy()
-                except Exception:
-                    pass
-            self._dialog_lock.release()
+            if not handed_off:
+                if top is not None:
+                    try:
+                        top.destroy()
+                    except Exception:
+                        pass
+                self._dialog_lock.release()
 
-        return result_value
+    def _poll_commands(self) -> None:
+        root = self._tk_root
+        if root is None:
+            return
+        try:
+            while True:
+                command = self._commands.get_nowait()
+                if command is None:
+                    root.destroy()
+                    return
+                self._handle_command(command)
+        except queue.Empty:
+            pass
+        try:
+            root.after(self.TRAY_POLL_MS, self._poll_commands)
+        except Exception:
+            pass
+
+    def _handle_command(self, command) -> None:
+        kind, payload = command
+        if kind == "edit_minutes":
+            self._open_minutes_dialog(int(payload))
+
+    def _tk_main(self) -> None:
+        try:
+            import tkinter as tk
+        except ImportError:
+            print(
+                "move-reminder: tkinter is not available, minutes dialog is disabled",
+                file=sys.stderr,
+            )
+            self._tk_ready.set()
+            return
+        try:
+            root = tk.Tk()
+        except Exception as exc:
+            print(f"move-reminder: failed to start GUI thread: {exc}", file=sys.stderr)
+            self._tk_root = None
+            self._tk_ready.set()
+            return
+        self._tk_root = root
+        self._tk_ready.set()
+        try:
+            root.withdraw()
+            root.after(self.TRAY_POLL_MS, self._poll_commands)
+            root.mainloop()
+        except Exception as exc:
+            print(f"move-reminder: tkinter thread failed: {exc}", file=sys.stderr)
 
     def _on_quit(self, _icon=None, _item=None) -> None:
         self.stop_timer()
@@ -349,4 +342,10 @@ class MoveReminderWindowsApp:
             print(f"move-reminder: failed to play sound: {exc}", file=sys.stderr)
 
     def run(self) -> None:
-        self._icon.run()
+        self._tk_thread.start()
+        self._tk_ready.wait(10)
+        try:
+            self._icon.run()
+        finally:
+            self._commands.put(None)
+            self._tk_thread.join(timeout=5)

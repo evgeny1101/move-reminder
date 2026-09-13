@@ -1,3 +1,16 @@
+move-reminder (1.1.7-1) unstable; urgency=medium
+
+  * Release 1.1.7.
+  * Move the minutes dialog into a dedicated Tk thread with a persistent
+    hidden root window; the tray menu no longer blocks while the dialog is
+    open, and the entry receives keyboard focus on Windows 10/11 without
+    Win32 SetForegroundWindow hacks.
+  * Dialog opening is asynchronous: the menu item queues a command processed
+    by the Tk thread, and the value is applied on dialog close.
+  * Add regression tests for the queue-based architecture.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Sun, 13 Sep 2026 12:37:19 +0000
+
 move-reminder (1.1.6-1) unstable; urgency=medium
 
   * Release 1.1.6.

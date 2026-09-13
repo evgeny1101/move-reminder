@@ -1,5 +1,6 @@
 import builtins
 import importlib
+import queue
 import sys
 import threading
 import types
@@ -43,7 +44,7 @@ def _install_windows_stubs() -> None:
     sys.modules["PIL.ImageDraw"] = draw_module
 
 
-def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
+def _install_tk_stubs(entry_value="45"):
     calls = {}
     entry_ref = [None]
     ok_command = [None]
@@ -55,16 +56,6 @@ def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
 
         def destroy(self):
             calls["root_destroyed"] = True
-
-    if raise_on_root:
-        class _FailingRoot(_Root):
-            def __init__(self):
-                raise RuntimeError("tk init fail")
-
-        tk_module = types.ModuleType("tkinter")
-        tk_module.Tk = _FailingRoot
-        sys.modules["tkinter"] = tk_module
-        return calls, entry_ref
 
     class _TopLevel:
         def __init__(self, parent):
@@ -87,13 +78,6 @@ def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
 
         def grab_set(self):
             calls["grab_set"] = True
-
-        def wait_window(self, w):
-            calls["wait_window"] = True
-            if cancel and cancel_command[0] is not None:
-                cancel_command[0]()
-            elif ok_command[0] is not None:
-                ok_command[0]()
 
         def after(self, ms, func):
             func()
@@ -161,14 +145,14 @@ def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
 
     tk_module = types.ModuleType("tkinter")
     tk_module.Tk = _Root
-    tk_module.Toplevel = lambda parent: _TopLevel(parent)
+    tk_module.Toplevel = _TopLevel
     tk_module.Frame = _Frame
     tk_module.Label = _Label
     tk_module.Entry = _Entry
     tk_module.Button = _Button
 
     sys.modules["tkinter"] = tk_module
-    return calls, entry_ref
+    return calls, entry_ref, ok_command, cancel_command
 
 
 _install_windows_stubs()
@@ -180,44 +164,70 @@ def _build_app():
     app._state_lock = threading.Lock()
     app._dialog_lock = threading.Lock()
     app.selected_minutes = 45
-    app._icon = types.SimpleNamespace(update_menu=lambda: None)
+    app.timer_seconds_left = 0
+    app._stop_event = threading.Event()
+    app._commands = queue.Queue()
+    app._tk_root = None
+    app._icon = types.SimpleNamespace(update_menu=lambda: None, stop=lambda: None)
     return app
 
 
-def test_edit_minutes_updates_value_and_menu(monkeypatch):
+def test_edit_minutes_queues_command_only():
     app = _build_app()
-    update_calls = []
-    monkeypatch.setattr(app, "_safe_update_menu", lambda: update_calls.append(True))
-    monkeypatch.setattr(app, "_ask_minutes_with_tk_dialog", lambda _initial: 30)
+    app.selected_minutes = 33
 
     app._on_edit_minutes_clicked()
 
-    assert app.selected_minutes == 30
-    assert update_calls == [True]
+    assert app._commands.get_nowait() == ("edit_minutes", 33)
+    assert app.selected_minutes == 33
 
 
-def test_edit_minutes_cancel_keeps_value(monkeypatch):
+def test_poll_commands_dispatches_edit_minutes(monkeypatch):
     app = _build_app()
-    app.selected_minutes = 50
-    update_calls = []
-    monkeypatch.setattr(app, "_safe_update_menu", lambda: update_calls.append(True))
-    monkeypatch.setattr(app, "_ask_minutes_with_tk_dialog", lambda _initial: None)
+    rescheduled = []
+    app._tk_root = types.SimpleNamespace(after=lambda ms, func: rescheduled.append(ms))
+    opened = []
+    monkeypatch.setattr(
+        app, "_open_minutes_dialog", lambda minutes: opened.append(minutes)
+    )
+    app._commands.put(("edit_minutes", 25))
 
-    app._on_edit_minutes_clicked()
+    app._poll_commands()
 
-    assert app.selected_minutes == 50
-    assert update_calls == []
+    assert opened == [25]
+    assert rescheduled == [app.TRAY_POLL_MS]
 
 
-def test_tk_dialog_returns_value_and_closes_root():
+def test_poll_commands_shuts_down():
     app = _build_app()
-    calls, entry_ref = _install_tk_stubs(entry_value="60")
+    destroyed = []
+    app._tk_root = types.SimpleNamespace(
+        after=lambda *args: None, destroy=lambda: destroyed.append(True)
+    )
+    app._commands.put(None)
 
-    result = app._ask_minutes_with_tk_dialog(45)
+    app._poll_commands()
 
-    assert result == 60
-    assert entry_ref[0] is not None
-    assert calls["withdrawn"] is True
+    assert destroyed == [True]
+
+
+def test_poll_commands_is_noop_without_root():
+    app = _build_app()
+    app._commands.put(("edit_minutes", 30))
+
+    app._poll_commands()
+
+    assert app._commands.get_nowait() == ("edit_minutes", 30)
+
+
+def test_open_dialog_uses_topmost_and_activates_entry():
+    app = _build_app()
+    app._tk_root = object()
+    calls, _entry_ref, _ok, _cancel = _install_tk_stubs()
+
+    app._open_minutes_dialog(45)
+
+    assert calls["top_created"] is True
     assert calls["topmost"] is True
     assert calls["updated_idletasks"] is True
     assert calls["lifted"] is True
@@ -225,153 +235,62 @@ def test_tk_dialog_returns_value_and_closes_root():
     assert calls["entry_focused"] is True
     assert calls["entry_selected"] is True
     assert calls["grab_set"] is True
-    assert calls["wait_window"] is True
-    assert calls["top_destroyed"] is True
-    assert calls["root_destroyed"] is True
 
 
-def test_tk_dialog_sets_initial_value_in_entry():
+def test_open_dialog_sets_initial_value_in_entry():
     app = _build_app()
-    _calls, entry_ref = _install_tk_stubs(entry_value="45")
+    app._tk_root = object()
+    _calls, entry_ref, _ok, _cancel = _install_tk_stubs()
 
-    app._ask_minutes_with_tk_dialog(33)
+    app._open_minutes_dialog(33)
 
     assert entry_ref[0] is not None
     assert entry_ref[0]._value == "33"
 
 
-def test_tk_dialog_binds_return_and_escape():
+def test_open_dialog_ok_updates_value_and_menu(monkeypatch):
     app = _build_app()
-    calls, _entry_ref = _install_tk_stubs()
+    app._tk_root = object()
+    calls, _ref, ok, _cancel = _install_tk_stubs(entry_value="60")
+    menu_calls = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
 
-    app._ask_minutes_with_tk_dialog(45)
+    app._open_minutes_dialog(45)
+    ok[0]()
+
+    assert app.selected_minutes == 60
+    assert menu_calls == [True]
+    assert calls["top_destroyed"] is True
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_cancel_keeps_value(monkeypatch):
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, cancel = _install_tk_stubs()
+    app.selected_minutes = 50
+    menu_calls = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
+
+    app._open_minutes_dialog(50)
+    cancel[0]()
+
+    assert app.selected_minutes == 50
+    assert menu_calls == []
+    assert calls["top_destroyed"] is True
+
+
+def test_open_dialog_binds_return_escape_and_close():
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, _cancel = _install_tk_stubs()
+
+    app._open_minutes_dialog(45)
 
     assert calls["bind_<Return>"] is not None
     assert calls["bind_<Escape>"] is not None
     assert calls["close_handler"] is not None
-
-
-def test_tk_dialog_returns_none_on_exception(capsys):
-    app = _build_app()
-    calls, _entry_ref = _install_tk_stubs(raise_on_root=True)
-
-    result = app._ask_minutes_with_tk_dialog(45)
-
-    assert result is None
-    assert "failed to open minutes dialog" in capsys.readouterr().err
-
-
-def test_tk_dialog_cancel_returns_none():
-    app = _build_app()
-    calls, _entry_ref = _install_tk_stubs(cancel=True)
-
-    result = app._ask_minutes_with_tk_dialog(45)
-
-    assert result is None
-    assert calls["top_destroyed"] is True
-    assert calls["root_destroyed"] is True
-
-
-def test_tk_dialog_guard_prevents_concurrent_open():
-    app = _build_app()
-    app._dialog_lock.acquire()
-    try:
-        result = app._ask_minutes_with_tk_dialog(45)
-    finally:
-        app._dialog_lock.release()
-
-    assert result is None
-
-
-def test_tk_dialog_tkinter_missing(monkeypatch, capsys):
-    app = _build_app()
-    sys.modules.pop("tkinter", None)
-    original_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "tkinter":
-            raise ImportError("tk unavailable")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    result = app._ask_minutes_with_tk_dialog(45)
-
-    assert result is None
-    assert "tkinter is not available" in capsys.readouterr().err
-
-
-def test_bring_to_foreground_is_noop_on_nonwindows(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    top = types.SimpleNamespace(winfo_id=lambda: 123)
-
-    result = windows_app._bring_to_foreground(top)
-
-    assert result is None
-
-
-def test_bring_to_foreground_win32_uses_input_attachment(monkeypatch):
-    calls = []
-
-    class _Fn:
-        def __init__(self, name, result=0):
-            self._name = name
-            self._result = result
-
-        def __call__(self, *_args):
-            calls.append(self._name)
-            return self._result
-
-    user32 = types.SimpleNamespace(
-        GetForegroundWindow=_Fn("GetForegroundWindow", 999),
-        GetCurrentThreadId=_Fn("GetCurrentThreadId", 123),
-        GetWindowThreadProcessId=_Fn("GetWindowThreadProcessId", 456),
-        AttachThreadInput=_Fn("AttachThreadInput"),
-        BringWindowToTop=_Fn("BringWindowToTop"),
-        SetForegroundWindow=_Fn("SetForegroundWindow"),
-    )
-    fake_ctypes = types.SimpleNamespace(
-        wintypes=types.SimpleNamespace(
-            HWND=int,
-            DWORD=int,
-            BOOL=bool,
-        ),
-        POINTER=lambda t: t,
-        windll=types.SimpleNamespace(user32=user32),
-    )
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
-    top = types.SimpleNamespace(winfo_id=lambda: 123)
-
-    windows_app._bring_to_foreground(top)
-
-    assert calls == [
-        "GetForegroundWindow",
-        "GetCurrentThreadId",
-        "GetWindowThreadProcessId",
-        "AttachThreadInput",
-        "BringWindowToTop",
-        "SetForegroundWindow",
-        "AttachThreadInput",
-    ]
-
-
-def test_tk_dialog_runs_foreground_activation(monkeypatch):
-    app = _build_app()
-    calls, _entry_ref = _install_tk_stubs()
-    activated = []
-    monkeypatch.setattr(
-        windows_app, "_bring_to_foreground", lambda top: activated.append(top)
-    )
-
-    app._ask_minutes_with_tk_dialog(45)
-
-    assert calls["updated_idletasks"] is True
-    assert calls["lifted"] is True
-    assert calls["top_focused"] is True
-    assert calls["entry_focused"] is True
-    assert calls["entry_selected"] is True
-    assert len(activated) == 2
 
 
 @pytest.mark.parametrize(
@@ -382,19 +301,150 @@ def test_tk_dialog_runs_foreground_activation(monkeypatch):
         ("30", 30),
     ],
 )
-def test_tk_dialog_clamps_input(entry_value, expected):
+def test_open_dialog_clamps_input(entry_value, expected):
     app = _build_app()
-    _calls, _entry_ref = _install_tk_stubs(entry_value=entry_value)
+    app._tk_root = object()
+    _calls, _ref, ok, _cancel = _install_tk_stubs(entry_value=entry_value)
 
-    result = app._ask_minutes_with_tk_dialog(45)
+    app._open_minutes_dialog(45)
+    ok[0]()
 
-    assert result == expected
+    assert app.selected_minutes == expected
 
 
-def test_tk_dialog_non_numeric_input_returns_none():
+def test_open_dialog_non_numeric_keeps_value(monkeypatch):
     app = _build_app()
-    _calls, _entry_ref = _install_tk_stubs(entry_value="abc")
+    app._tk_root = object()
+    _calls, _ref, ok, _cancel = _install_tk_stubs(entry_value="abc")
+    menu_calls = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
 
-    result = app._ask_minutes_with_tk_dialog(45)
+    app._open_minutes_dialog(45)
+    ok[0]()
 
-    assert result is None
+    assert app.selected_minutes == 45
+    assert menu_calls == []
+
+
+def test_open_dialog_guard_prevents_concurrent_open():
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, _cancel = _install_tk_stubs()
+    app._dialog_lock.acquire()
+    try:
+        app._open_minutes_dialog(45)
+    finally:
+        app._dialog_lock.release()
+
+    assert "top_created" not in calls
+
+
+def test_open_dialog_returns_if_root_missing():
+    app = _build_app()
+    calls, _ref, _ok, _cancel = _install_tk_stubs()
+
+    app._open_minutes_dialog(45)
+
+    assert "top_created" not in calls
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_tk_import_error_releases_lock(monkeypatch, capsys):
+    app = _build_app()
+    app._tk_root = object()
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tkinter":
+            raise ImportError("tk unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    app._open_minutes_dialog(45)
+
+    assert "failed to open minutes dialog" in capsys.readouterr().err
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_tk_main_handles_missing_tkinter(monkeypatch, capsys):
+    app = _build_app()
+    ready = threading.Event()
+    app._tk_ready = ready
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tkinter":
+            raise ImportError("tk unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    app._tk_main()
+
+    assert ready.is_set()
+    assert app._tk_root is None
+    assert "tkinter is not available" in capsys.readouterr().err
+
+
+def test_tk_main_starts_root_event_loop(monkeypatch):
+    app = _build_app()
+    ready = threading.Event()
+    app._tk_ready = ready
+    calls = []
+
+    class _RootStub:
+        def withdraw(self):
+            calls.append("withdraw")
+
+        def after(self, ms, func):
+            calls.append(("after", ms))
+
+        def mainloop(self):
+            calls.append("mainloop")
+
+    tk_module = types.ModuleType("tkinter")
+    tk_module.Tk = _RootStub
+    monkeypatch.setitem(sys.modules, "tkinter", tk_module)
+
+    app._tk_main()
+
+    assert ready.is_set()
+    assert app._tk_root is not None
+    assert calls == ["withdraw", ("after", app.TRAY_POLL_MS), "mainloop"]
+
+
+def test_run_starts_thread_runs_icon_and_shuts_down():
+    app = _build_app()
+    app._tk_ready = threading.Event()
+    app._tk_ready.set()
+    started = []
+    joined = []
+    app._tk_thread = types.SimpleNamespace(
+        start=lambda: started.append(True),
+        join=lambda **kwargs: joined.append(True),
+    )
+    icon_ran = []
+    app._icon = types.SimpleNamespace(run=lambda: icon_ran.append(True))
+
+    app.run()
+
+    assert started == [True]
+    assert icon_ran == [True]
+    assert joined == [True]
+    assert app._commands.get_nowait() is None
+
+
+def test_on_quit_stops_icon_and_timer(monkeypatch):
+    app = _build_app()
+    stopped = []
+    monkeypatch.setattr(app._icon, "stop", lambda: stopped.append(True))
+
+    app.start_timer(2)
+    app._on_quit()
+
+    assert stopped == [True]
+    assert app.timer_seconds_left == 0
+    assert app._stop_event.is_set()
