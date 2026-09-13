@@ -98,6 +98,9 @@ def _install_tk_stubs(entry_value="45", raise_on_root=False, cancel=False):
         def after(self, ms, func):
             func()
 
+        def update_idletasks(self):
+            calls["updated_idletasks"] = True
+
         def focus_force(self):
             calls["top_focused"] = True
 
@@ -216,6 +219,7 @@ def test_tk_dialog_returns_value_and_closes_root():
     assert entry_ref[0] is not None
     assert calls["withdrawn"] is True
     assert calls["topmost"] is True
+    assert calls["updated_idletasks"] is True
     assert calls["lifted"] is True
     assert calls["top_focused"] is True
     assert calls["entry_focused"] is True
@@ -295,6 +299,79 @@ def test_tk_dialog_tkinter_missing(monkeypatch, capsys):
 
     assert result is None
     assert "tkinter is not available" in capsys.readouterr().err
+
+
+def test_bring_to_foreground_is_noop_on_nonwindows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    top = types.SimpleNamespace(winfo_id=lambda: 123)
+
+    result = windows_app._bring_to_foreground(top)
+
+    assert result is None
+
+
+def test_bring_to_foreground_win32_uses_input_attachment(monkeypatch):
+    calls = []
+
+    class _Fn:
+        def __init__(self, name, result=0):
+            self._name = name
+            self._result = result
+
+        def __call__(self, *_args):
+            calls.append(self._name)
+            return self._result
+
+    user32 = types.SimpleNamespace(
+        GetForegroundWindow=_Fn("GetForegroundWindow", 999),
+        GetCurrentThreadId=_Fn("GetCurrentThreadId", 123),
+        GetWindowThreadProcessId=_Fn("GetWindowThreadProcessId", 456),
+        AttachThreadInput=_Fn("AttachThreadInput"),
+        BringWindowToTop=_Fn("BringWindowToTop"),
+        SetForegroundWindow=_Fn("SetForegroundWindow"),
+    )
+    fake_ctypes = types.SimpleNamespace(
+        wintypes=types.SimpleNamespace(
+            HWND=int,
+            DWORD=int,
+            BOOL=bool,
+        ),
+        POINTER=lambda t: t,
+        windll=types.SimpleNamespace(user32=user32),
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    top = types.SimpleNamespace(winfo_id=lambda: 123)
+
+    windows_app._bring_to_foreground(top)
+
+    assert calls == [
+        "GetForegroundWindow",
+        "GetCurrentThreadId",
+        "GetWindowThreadProcessId",
+        "AttachThreadInput",
+        "BringWindowToTop",
+        "SetForegroundWindow",
+        "AttachThreadInput",
+    ]
+
+
+def test_tk_dialog_runs_foreground_activation(monkeypatch):
+    app = _build_app()
+    calls, _entry_ref = _install_tk_stubs()
+    activated = []
+    monkeypatch.setattr(
+        windows_app, "_bring_to_foreground", lambda top: activated.append(top)
+    )
+
+    app._ask_minutes_with_tk_dialog(45)
+
+    assert calls["updated_idletasks"] is True
+    assert calls["lifted"] is True
+    assert calls["top_focused"] is True
+    assert calls["entry_focused"] is True
+    assert calls["entry_selected"] is True
+    assert len(activated) == 2
 
 
 @pytest.mark.parametrize(

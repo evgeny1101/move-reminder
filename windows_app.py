@@ -15,6 +15,85 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 
+def _activate_dialog(top, entry) -> None:
+    """Gives keyboard focus to the entry of a tkinter dialog.
+
+    Tkinter's focus_force does not reliably transfer keyboard focus on Windows
+    10/11 when the dialog is opened from a tray menu, so the native window is
+    additionally brought to the foreground via the Win32 API.
+    """
+    try:
+        top.update_idletasks()
+    except Exception:
+        pass
+    try:
+        top.lift()
+    except Exception:
+        pass
+    _bring_to_foreground(top)
+    try:
+        top.focus_force()
+    except Exception:
+        pass
+    try:
+        entry.focus_set()
+    except Exception:
+        pass
+    try:
+        entry.select_range(0, "end")
+    except Exception:
+        pass
+
+
+def _bring_to_foreground(top) -> None:
+    """Brings a tkinter window to the Windows foreground.
+
+    Needed because a background process cannot always take the foreground with
+    SetForegroundWindow alone; attaching to the input queue of the current
+    foreground thread makes the call succeed.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+    except Exception:
+        return
+    try:
+        hwnd = int(top.winfo_id())
+    except Exception:
+        return
+    try:
+        wintypes = ctypes.wintypes
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetCurrentThreadId.restype = wintypes.DWORD
+        user32.GetWindowThreadProcessId.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.AttachThreadInput.argtypes = [
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.BOOL,
+        ]
+        user32.BringWindowToTop.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+        foreground = user32.GetForegroundWindow()
+        current_thread = user32.GetCurrentThreadId()
+        foreground_thread = user32.GetWindowThreadProcessId(foreground, 0)
+        if foreground_thread != current_thread:
+            user32.AttachThreadInput(foreground_thread, current_thread, True)
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                user32.AttachThreadInput(foreground_thread, current_thread, False)
+    except Exception:
+        pass
+
+
 class MoveReminderWindowsApp:
     APP_NAME = "Move Reminder"
 
@@ -186,15 +265,8 @@ class MoveReminderWindowsApp:
 
             top.protocol("WM_DELETE_WINDOW", _on_cancel)
 
-            top.after(
-                50,
-                lambda: (
-                    top.lift(),
-                    top.focus_force(),
-                    entry.focus_set(),
-                    entry.select_range(0, "end"),
-                ),
-            )
+            _activate_dialog(top, entry)
+            top.after(50, lambda: _activate_dialog(top, entry))
 
             top.grab_set()
             top.wait_window(top)
