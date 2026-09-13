@@ -1,8 +1,5 @@
 name: Release Windows Package
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   push:
     tags:
@@ -57,7 +54,7 @@ jobs:
           }
 
       - name: Publish GitHub release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           files: |
             dist/move-reminder-portable.exe
