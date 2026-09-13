@@ -1,5 +1,6 @@
 import builtins
 import importlib
+import pathlib
 import queue
 import sys
 import threading
@@ -448,3 +449,118 @@ def test_on_quit_stops_icon_and_timer(monkeypatch):
     assert stopped == [True]
     assert app.timer_seconds_left == 0
     assert app._stop_event.is_set()
+
+
+def test_find_powershell_returns_which_path(monkeypatch):
+    fake = pathlib.Path("/tmp/powershell.exe")
+    monkeypatch.setattr(windows_app.shutil, "which", lambda *_a, **_k: str(fake))
+
+    assert windows_app._find_powershell() == fake
+
+
+def test_find_powershell_returns_none_when_missing(monkeypatch):
+    monkeypatch.setattr(windows_app.shutil, "which", lambda *_a, **_k: None)
+
+    assert windows_app._find_powershell() is None
+
+
+def test_send_windows_toast_false_without_powershell(monkeypatch):
+    monkeypatch.setattr(windows_app, "_find_powershell", lambda: None)
+
+    assert windows_app._send_windows_toast("title", "message") is False
+
+
+def test_send_windows_toast_invokes_powershell(monkeypatch):
+    fake = pathlib.Path("/usr/bin/powershell.exe")
+    monkeypatch.setattr(windows_app, "_find_powershell", lambda: fake)
+    runs = []
+
+    def fake_run(argv, **kwargs):
+        runs.append((argv, kwargs))
+        return None
+
+    monkeypatch.setattr(windows_app.subprocess, "run", fake_run)
+
+    assert windows_app._send_windows_toast("Пора подвигаться", "Таймер завершен.") is True
+
+    argv, kwargs = runs[0]
+    assert argv[0] == str(fake)
+    assert "-NoProfile" in argv
+    assert "-NonInteractive" in argv
+    assert "-WindowStyle" in argv
+    assert argv[argv.index("-Command") + 1] == windows_app._POWERTOAST_PS
+    assert kwargs["env"][windows_app._NOTIFY_TITLE_ENV] == "Пора подвигаться"
+    assert kwargs["env"][windows_app._NOTIFY_MESSAGE_ENV] == "Таймер завершен."
+
+
+def test_send_windows_toast_swallows_subprocess_error(monkeypatch, capsys):
+    fake = pathlib.Path("/usr/bin/powershell.exe")
+    monkeypatch.setattr(windows_app, "_find_powershell", lambda: fake)
+
+    def fake_run(argv, **kwargs):
+        raise OSError("boom")
+
+    monkeypatch.setattr(windows_app.subprocess, "run", fake_run)
+
+    assert windows_app._send_windows_toast("title", "message") is False
+    assert "failed to show notification" in capsys.readouterr().err
+
+
+def test_powertoast_script_uses_both_aumids():
+    script = windows_app._POWERTOAST_PS
+    assert "MoveReminder.App" in script
+    assert (
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}"
+        "\\WindowsPowerShell\\v1.0\\powershell.exe" in script
+    )
+
+
+def test_deliver_notification_falls_back_to_icon(monkeypatch):
+    app = _build_app()
+    notified = []
+    app._icon = types.SimpleNamespace(
+        notify=lambda title, message: notified.append((title, message))
+    )
+    monkeypatch.setattr(windows_app, "_send_windows_toast", lambda *_a, **_k: False)
+
+    app._deliver_notification()
+
+    assert notified == [(windows_app._REMINDER_TITLE, windows_app._REMINDER_MESSAGE)]
+
+
+def test_deliver_notification_skips_icon_on_success(monkeypatch):
+    app = _build_app()
+    called = []
+    app._icon = types.SimpleNamespace(
+        notify=lambda title, message: called.append(True)
+    )
+    monkeypatch.setattr(windows_app, "_send_windows_toast", lambda *_a, **_k: True)
+
+    app._deliver_notification()
+
+    assert called == []
+
+
+def test_notify_done_runs_delivery_in_background_thread(monkeypatch):
+    app = _build_app()
+    app._icon = types.SimpleNamespace(
+        notify=lambda title, message: None
+    )
+    targets = []
+    monkeypatch.setattr(windows_app, "_send_windows_toast", lambda *_a, **_k: True)
+
+    class FakeThread:
+        def __init__(self, target=None, **_kwargs):
+            targets.append(target)
+
+        def start(self):
+            for target in targets:
+                target()
+
+    monkeypatch.setattr(windows_app.threading, "Thread", FakeThread)
+
+    app._notify_done()
+
+    assert len(targets) == 1
+    assert targets[0] is not None
+    targets[0]()

@@ -1,3 +1,21 @@
+move-reminder (1.1.8-1) unstable; urgency=medium
+
+  * Release 1.1.8.
+  * Replace win10toast with native Windows 10/11 toast notifications via
+    WinRT ToastNotificationManager invoked through powershell.exe; the title
+    and message travel in environment variables to avoid encoding and
+    quoting issues.
+  * Use the app's own AppUserModelID (MoveReminder.App, registered by the
+    installer shortcuts) with a fallback to the always-registered PowerShell
+    AUMID, so the toast is not silently dropped on Windows 11.
+  * Deliver notifications in a background thread so the sound and the toast
+    appear together; fall back to the tray icon notify() when PowerShell is
+    unavailable.
+  * Drop the win10toast dependency and add regression tests for the toast
+    command, environment variables, error handling and fallback behavior.
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Sun, 13 Sep 2026 13:19:26 +0000
+
 move-reminder (1.1.7-1) unstable; urgency=medium
 
   * Release 1.1.7.

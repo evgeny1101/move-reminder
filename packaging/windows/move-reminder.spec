@@ -15,7 +15,6 @@ a = Analysis(
         'pystray',
         'PIL',
         'PIL._tkinter_finder',
-        'win10toast',
         'windows_app',
     ],
     hookspath=[],

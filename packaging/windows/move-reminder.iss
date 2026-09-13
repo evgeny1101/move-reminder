@@ -34,8 +34,8 @@ Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Ad
 Source: "dist\move-reminder-portable.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Move Reminder"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Move Reminder"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\Move Reminder"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "MoveReminder.App"
+Name: "{autodesktop}\Move Reminder"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; AppUserModelID: "MoveReminder.App"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Move Reminder"; Flags: nowait postinstall skipifsilent

@@ -2,6 +2,8 @@ import atexit
 import os
 import pathlib
 import queue
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -14,6 +16,86 @@ except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
         "Windows mode requires pystray and Pillow. Install: pip install pystray pillow"
     ) from exc
+
+
+_PROCESS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+_NOTIFY_TITLE_ENV = "MR_NOTIFY_TITLE"
+_NOTIFY_MESSAGE_ENV = "MR_NOTIFY_MESSAGE"
+
+_REMINDER_TITLE = "Пора подвигаться"
+_REMINDER_MESSAGE = "Таймер завершен. Встань и немного разомнись."
+
+# Нативное Toast-уведомление Windows 10/11 через встроенный WinRT
+# ToastNotificationManager, вызываемый штатным powershell.exe (без win10toast).
+# Текст передается через переменные окружения: кириллица доезжает без потерь,
+# и ни кавычки, ни спецсимволы не ломают командную строку. Для установленного
+# приложения в Inno Setup регистрируется собственный AppUserModelID
+# ("MoveReminder.App"); portable-версия падает на гарантированно
+# зарегистрированный AUMID PowerShell, чтобы баннер не терялся в Windows 11.
+_POWERTOAST_PS = (
+    "$ErrorActionPreference='Stop';"
+    "[Windows.UI.Notifications.ToastNotificationManager,"
+    "Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
+    "$t=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+    "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+    "$x=$t.GetElementsByTagName('text');"
+    "$x.Item(0).AppendChild($t.CreateTextNode($env:MR_NOTIFY_TITLE))|Out-Null;"
+    "$x.Item(1).AppendChild($t.CreateTextNode($env:MR_NOTIFY_MESSAGE))|Out-Null;"
+    "$n=[Windows.UI.Notifications.ToastNotification]::new($t);"
+    "try{$n.Priority="
+    "[Windows.UI.Notifications.ToastNotificationPriority]::High}catch{};"
+    "$aumids=@('MoveReminder.App',"
+    "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}"
+    "\\WindowsPowerShell\\v1.0\\powershell.exe');"
+    "foreach($a in $aumids){"
+    "try{$notifier=[Windows.UI.Notifications.ToastNotificationManager]::"
+    "CreateToastNotifier($a);$notifier.Show($n);break}catch{}}"
+)
+
+
+def _find_powershell():
+    exe = shutil.which("powershell") or shutil.which("pwsh")
+    if exe:
+        return pathlib.Path(exe)
+    candidate = (
+        pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+    return candidate if candidate.is_file() else None
+
+
+def _send_windows_toast(title, message) -> bool:
+    powershell = _find_powershell()
+    if powershell is None:
+        return False
+    env = dict(os.environ)
+    env[_NOTIFY_TITLE_ENV] = title
+    env[_NOTIFY_MESSAGE_ENV] = message
+    command = [
+        str(powershell),
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        _POWERTOAST_PS,
+    ]
+    try:
+        subprocess.run(
+            command,
+            timeout=15,
+            capture_output=True,
+            env=env,
+            creationflags=_PROCESS_NO_WINDOW,
+        )
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        print(f"move-reminder: failed to show notification: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def _activate_dialog(top, entry) -> None:
@@ -320,16 +402,17 @@ class MoveReminderWindowsApp:
             self._safe_update_menu()
 
     def _notify_done(self) -> None:
-        try:
-            from win10toast import ToastNotifier
+        threading.Thread(
+            target=self._deliver_notification,
+            name="move-reminder-notification",
+            daemon=True,
+        ).start()
 
-            toaster = ToastNotifier()
-            toaster.show_toast(
-                "Пора подвигаться",
-                "Таймер завершен. Встань и немного разомнись.",
-                duration=8,
-                threaded=True,
-            )
+    def _deliver_notification(self) -> None:
+        if _send_windows_toast(_REMINDER_TITLE, _REMINDER_MESSAGE):
+            return
+        try:
+            self._icon.notify(_REMINDER_TITLE, _REMINDER_MESSAGE)
         except Exception as exc:
             print(f"move-reminder: failed to show notification: {exc}", file=sys.stderr)
 
