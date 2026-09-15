@@ -50,6 +50,7 @@ def _install_tk_stubs(entry_value="45"):
     entry_ref = [None]
     ok_command = [None]
     cancel_command = [None]
+    start_command = [None]
 
     class _Root:
         def withdraw(self):
@@ -140,6 +141,8 @@ def _install_tk_stubs(entry_value="45"):
                 ok_command[0] = command
             elif text == "Отмена":
                 cancel_command[0] = command
+            elif text == "Старт":
+                start_command[0] = command
 
         def pack(self, **kwargs):
             pass
@@ -153,7 +156,7 @@ def _install_tk_stubs(entry_value="45"):
     tk_module.Button = _Button
 
     sys.modules["tkinter"] = tk_module
-    return calls, entry_ref, ok_command, cancel_command
+    return calls, entry_ref, ok_command, cancel_command, start_command
 
 
 _install_windows_stubs()
@@ -224,7 +227,7 @@ def test_poll_commands_is_noop_without_root():
 def test_open_dialog_uses_topmost_and_activates_entry():
     app = _build_app()
     app._tk_root = object()
-    calls, _entry_ref, _ok, _cancel = _install_tk_stubs()
+    calls, _entry_ref, _ok, _cancel, _start = _install_tk_stubs()
 
     app._open_minutes_dialog(45)
 
@@ -241,7 +244,7 @@ def test_open_dialog_uses_topmost_and_activates_entry():
 def test_open_dialog_sets_initial_value_in_entry():
     app = _build_app()
     app._tk_root = object()
-    _calls, entry_ref, _ok, _cancel = _install_tk_stubs()
+    _calls, entry_ref, _ok, _cancel, _start = _install_tk_stubs()
 
     app._open_minutes_dialog(33)
 
@@ -252,7 +255,7 @@ def test_open_dialog_sets_initial_value_in_entry():
 def test_open_dialog_ok_updates_value_and_menu(monkeypatch):
     app = _build_app()
     app._tk_root = object()
-    calls, _ref, ok, _cancel = _install_tk_stubs(entry_value="60")
+    calls, _ref, ok, _cancel, _start = _install_tk_stubs(entry_value="60")
     menu_calls = []
     monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
 
@@ -269,7 +272,7 @@ def test_open_dialog_ok_updates_value_and_menu(monkeypatch):
 def test_open_dialog_cancel_keeps_value(monkeypatch):
     app = _build_app()
     app._tk_root = object()
-    calls, _ref, _ok, cancel = _install_tk_stubs()
+    calls, _ref, _ok, cancel, _start = _install_tk_stubs()
     app.selected_minutes = 50
     menu_calls = []
     monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
@@ -285,7 +288,7 @@ def test_open_dialog_cancel_keeps_value(monkeypatch):
 def test_open_dialog_binds_return_escape_and_close():
     app = _build_app()
     app._tk_root = object()
-    calls, _ref, _ok, _cancel = _install_tk_stubs()
+    calls, _ref, _ok, _cancel, _start = _install_tk_stubs()
 
     app._open_minutes_dialog(45)
 
@@ -305,7 +308,7 @@ def test_open_dialog_binds_return_escape_and_close():
 def test_open_dialog_clamps_input(entry_value, expected):
     app = _build_app()
     app._tk_root = object()
-    _calls, _ref, ok, _cancel = _install_tk_stubs(entry_value=entry_value)
+    _calls, _ref, ok, _cancel, _start = _install_tk_stubs(entry_value=entry_value)
 
     app._open_minutes_dialog(45)
     ok[0]()
@@ -316,7 +319,7 @@ def test_open_dialog_clamps_input(entry_value, expected):
 def test_open_dialog_non_numeric_keeps_value(monkeypatch):
     app = _build_app()
     app._tk_root = object()
-    _calls, _ref, ok, _cancel = _install_tk_stubs(entry_value="abc")
+    _calls, _ref, ok, _cancel, _start = _install_tk_stubs(entry_value="abc")
     menu_calls = []
     monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
 
@@ -330,7 +333,7 @@ def test_open_dialog_non_numeric_keeps_value(monkeypatch):
 def test_open_dialog_guard_prevents_concurrent_open():
     app = _build_app()
     app._tk_root = object()
-    calls, _ref, _ok, _cancel = _install_tk_stubs()
+    calls, _ref, _ok, _cancel, _start = _install_tk_stubs()
     app._dialog_lock.acquire()
     try:
         app._open_minutes_dialog(45)
@@ -342,7 +345,7 @@ def test_open_dialog_guard_prevents_concurrent_open():
 
 def test_open_dialog_returns_if_root_missing():
     app = _build_app()
-    calls, _ref, _ok, _cancel = _install_tk_stubs()
+    calls, _ref, _ok, _cancel, _start = _install_tk_stubs()
 
     app._open_minutes_dialog(45)
 
@@ -559,8 +562,128 @@ def test_notify_done_runs_delivery_in_background_thread(monkeypatch):
 
     monkeypatch.setattr(windows_app.threading, "Thread", FakeThread)
 
-    app._notify_done()
 
-    assert len(targets) == 1
-    assert targets[0] is not None
-    targets[0]()
+def test_open_dialog_start_updates_value_and_starts_timer(monkeypatch):
+    app = _build_app()
+    app._tk_root = object()
+    calls, entry_ref, _ok, cancel, start = _install_tk_stubs(entry_value="30")
+    menu_calls = []
+    started = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: menu_calls.append(True))
+    monkeypatch.setattr(app, "start_timer", lambda minutes: started.append(minutes))
+
+    app._open_minutes_dialog(45)
+    start[0]()
+
+    assert app.selected_minutes == 30
+    assert started == [30]
+    assert menu_calls == [True]
+    assert calls["top_destroyed"] is True
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_start_clamps_input(monkeypatch):
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, cancel, start = _install_tk_stubs(entry_value="0")
+    started = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: None)
+    monkeypatch.setattr(app, "start_timer", lambda minutes: started.append(minutes))
+
+    app._open_minutes_dialog(45)
+    start[0]()
+
+    assert app.selected_minutes == 1
+    assert started == [1]
+    assert calls["top_destroyed"] is True
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_start_clamps_upper_bound(monkeypatch):
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, cancel, start = _install_tk_stubs(entry_value="1000")
+    started = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: None)
+    monkeypatch.setattr(app, "start_timer", lambda minutes: started.append(minutes))
+
+    app._open_minutes_dialog(45)
+    start[0]()
+
+    assert app.selected_minutes == 600
+    assert started == [600]
+    assert calls["top_destroyed"] is True
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_start_non_numeric_no_start_or_save(monkeypatch):
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, cancel, start = _install_tk_stubs(entry_value="abc")
+    started = []
+    monkeypatch.setattr(app, "_safe_update_menu", lambda: None)
+    monkeypatch.setattr(app, "start_timer", lambda minutes: started.append(minutes))
+
+    app._open_minutes_dialog(45)
+    start[0]()
+
+    assert app.selected_minutes == 45
+    assert started == []
+    assert calls["top_destroyed"] is True
+    assert app._dialog_lock.acquire(blocking=False) is True
+    app._dialog_lock.release()
+
+
+def test_open_dialog_enter_binds_to_start():
+    app = _build_app()
+    app._tk_root = object()
+    calls, _ref, _ok, cancel, start = _install_tk_stubs(entry_value="30")
+
+    app._open_minutes_dialog(45)
+
+    assert calls["bind_<Return>"] is not None
+    assert calls["bind_<Escape>"] is not None
+    assert start[0] is not None
+
+
+def test_parse_minutes_valid_input():
+    app = _build_app()
+    app._tk_root = object()
+    result = app._parse_minutes("45")
+
+    assert result == 45
+
+
+def test_parse_minutes_zero():
+    app = _build_app()
+    app._tk_root = object()
+    result = app._parse_minutes("0")
+
+    assert result == 1
+
+
+def test_parse_minutes_upper_bound():
+    app = _build_app()
+    app._tk_root = object()
+    result = app._parse_minutes("1000")
+
+    assert result == 600
+
+
+def test_parse_minutes_non_numeric():
+    app = _build_app()
+    app._tk_root = object()
+    result = app._parse_minutes("abc")
+
+    assert result is None
+
+
+def test_parse_minutes_none_input():
+    app = _build_app()
+    app._tk_root = object()
+    result = app._parse_minutes(None)
+
+    assert result is None

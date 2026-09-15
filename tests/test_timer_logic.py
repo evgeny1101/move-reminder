@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from unittest import mock
 
 
 def _install_gi_stubs() -> None:
@@ -64,6 +65,7 @@ def _build_app():
     app.timer_source_id = None
     app.selected_minutes = 45
     app.status_item = _MenuItem()
+    app.minutes_item = _MenuItem()
     app.start_item = _MenuItem()
     app.stop_item = _MenuItem()
     app.indicator = _Indicator()
@@ -183,3 +185,63 @@ def test_play_sound_tries_next_on_failures(monkeypatch):
     assert len(commands) == 2
     assert commands[0][0] == "canberra-gtk-play"
     assert commands[1][0] == "paplay"
+
+
+def test_apply_minutes_saves_and_updates_label_only():
+    app = _build_app()
+
+    app._apply_minutes(60, start=False)
+
+    assert app.selected_minutes == 60
+    assert app.minutes_item.label == "Минуты: 60"
+
+
+def test_apply_minutes_saves_and_starts():
+    app = _build_app()
+    app._refresh_minutes_label = lambda: None
+
+    start_calls = []
+
+    def fake_start(self, minutes):
+        start_calls.append(minutes)
+
+    with mock.patch.object(timer_tray.MoveReminderApp, "start_timer", fake_start):
+        app._apply_minutes(30, start=True)
+
+    assert app.selected_minutes == 30
+    assert start_calls == [30]
+
+
+def test_apply_minutes_zero_clamped_and_stops_previous():
+    app = _build_app()
+    app.timer_seconds_left = 5
+    app.timer_source_id = 111
+    app._refresh_minutes_label = lambda: None
+    app.stop_timer = lambda: None
+
+    start_calls = []
+
+    def fake_start(self, minutes):
+        start_calls.append(minutes)
+
+    with mock.patch.object(timer_tray.MoveReminderApp, "start_timer", fake_start):
+        app._apply_minutes(0, start=True)
+
+    assert app.selected_minutes == 1
+    assert start_calls == [1]
+
+
+def test_apply_minutes_clamped_upper_bound():
+    app = _build_app()
+    app._refresh_minutes_label = lambda: None
+
+    start_calls = []
+
+    def fake_start(self, minutes):
+        start_calls.append(minutes)
+
+    with mock.patch.object(timer_tray.MoveReminderApp, "start_timer", fake_start):
+        app._apply_minutes(1000, start=True)
+
+    assert app.selected_minutes == 600
+    assert start_calls == [600]

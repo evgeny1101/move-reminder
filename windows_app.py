@@ -229,6 +229,15 @@ class MoveReminderWindowsApp:
             self.selected_minutes = minutes
         self.start_timer(minutes)
 
+    def _parse_minutes(self, text: Optional[str]) -> Optional[int]:
+        if text is None:
+            return None
+        try:
+            value = int(text.strip())
+        except (ValueError, TypeError):
+            return None
+        return max(1, min(value, 600))
+
     def _on_edit_minutes_clicked(self, _icon=None, _item=None) -> None:
         with self._state_lock:
             initial_minutes = self.selected_minutes
@@ -276,14 +285,20 @@ class MoveReminderWindowsApp:
                 self._dialog_lock.release()
 
             def _on_submit():
-                try:
-                    val = int(entry.get().strip())
-                except (ValueError, TypeError):
-                    val = None
-                _finish(max(1, min(val, 600)) if val is not None else None)
+                val = self._parse_minutes(entry.get())
+                _finish(val)
 
             def _on_cancel():
                 _finish(None)
+
+            def _on_start_submit():
+                val = self._parse_minutes(entry.get())
+                _finish(val)
+                if val is not None:
+                    self.start_timer(val)
+
+            start_btn = tk.Button(btn_frame, text="Старт", width=8, command=_on_start_submit)
+            start_btn.pack(side="right", padx=(4, 0))
 
             ok_btn = tk.Button(btn_frame, text="OK", width=8, command=_on_submit)
             ok_btn.pack(side="right", padx=(4, 0))
@@ -291,7 +306,7 @@ class MoveReminderWindowsApp:
             cancel_btn = tk.Button(btn_frame, text="Отмена", width=8, command=_on_cancel)
             cancel_btn.pack(side="right")
 
-            entry.bind("<Return>", lambda _: _on_submit())
+            entry.bind("<Return>", lambda _: _on_start_submit())
             entry.bind("<Escape>", lambda _: _on_cancel())
             top.protocol("WM_DELETE_WINDOW", _on_cancel)
 

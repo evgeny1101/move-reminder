@@ -1,3 +1,18 @@
+move-reminder (1.2.0-1) unstable; urgency=medium
+
+  * Release 1.2.0.
+  * Add a Start button to the minutes dialog that applies the entered value
+    and immediately starts the timer, on both Linux (GTK) and Windows
+    (tkinter).
+  * Pressing Enter in the minutes entry now starts the timer at once; OK only
+    saves the value, Cancel leaves everything unchanged.
+  * Restarting an already running timer from the dialog uses the new value.
+  * Add regression tests for both platforms: Start button, Enter binding,
+    clamping to 1..600, non-numeric input, _apply_minutes (Linux) and
+    _parse_minutes (Windows).
+
+ -- Move Reminder Contributors <maintainers@move-reminder.invalid>  Wed, 16 Sep 2026 12:00:00 +0000
+
 move-reminder (1.1.8-1) unstable; urgency=medium
 
   * Release 1.1.8.

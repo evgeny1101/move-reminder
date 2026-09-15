@@ -33,6 +33,7 @@ AppIndicator3 = _load_indicator_class()
 class MoveReminderApp:
     APP_ID = "move-reminder"
     APP_NAME = "Move Reminder"
+    RESPONSE_START = 100
 
     def __init__(self) -> None:
         self._single_instance_lock = self._acquire_single_instance_lock()
@@ -131,6 +132,13 @@ class MoveReminderApp:
         self._refresh_minutes_label()
         self.start_timer(minutes)
 
+    def _apply_minutes(self, minutes: int, start: bool = False) -> None:
+        minutes = max(1, min(minutes, 600))
+        self.selected_minutes = minutes
+        self._refresh_minutes_label()
+        if start:
+            self.start_timer(minutes)
+
     def _on_edit_minutes_clicked(self, _widget: Gtk.Widget) -> None:
         dialog = Gtk.Dialog(
             title="Изменить минуты",
@@ -138,6 +146,8 @@ class MoveReminderApp:
         )
         dialog.add_button("Отмена", Gtk.ResponseType.CANCEL)
         dialog.add_button("OK", Gtk.ResponseType.OK)
+        dialog.add_button("Старт", self.RESPONSE_START)
+        dialog.set_default_response(self.RESPONSE_START)
 
         content = dialog.get_content_area()
         content.set_spacing(8)
@@ -148,6 +158,7 @@ class MoveReminderApp:
         spin = Gtk.SpinButton.new_with_range(1, 600, 1)
         spin.set_numeric(True)
         spin.set_value(self.selected_minutes)
+        spin.connect("activate", lambda *_: dialog.response(self.RESPONSE_START))
 
         content.pack_start(label, False, False, 0)
         content.pack_start(spin, False, False, 0)
@@ -155,9 +166,9 @@ class MoveReminderApp:
         dialog.show_all()
         response = dialog.run()
 
-        if response == Gtk.ResponseType.OK:
-            self.selected_minutes = int(spin.get_value())
-            self._refresh_minutes_label()
+        if response == Gtk.ResponseType.OK or response == self.RESPONSE_START:
+            minutes = int(spin.get_value())
+            self._apply_minutes(minutes, start=response == self.RESPONSE_START)
 
         dialog.destroy()
 
